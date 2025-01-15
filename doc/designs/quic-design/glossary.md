@@ -151,7 +151,7 @@ Initial packets. It is only used temporarily.
 `SSL_new` using a QUIC method.
 
 **QCTX**: QUIC Context. This is a utility object defined within the QUIC APL
-which helps to unwrap a SSL object pointer (a QCSO or QSSO) into the relevant
+which helps to unwrap an SSL object pointer (a QCSO or QSSO) into the relevant
 structure pointers such as `QUIC_CONNECTION` or `QUIC_XSO`.
 
 **QRL:** QUIC record layer. Refers collectively to the QRX and QTX.
@@ -213,6 +213,9 @@ frame which was transmitted. See FIFM design document for details.
 
 **Remotely-initiated:** Refers to a QUIC stream which was initiated by the
 remote peer, rather than by the local application.
+
+**RIO:** Reactive I/O subsystem. Refers to the generic, non-QUIC specific parts
+of the asynchronous I/O handling code which the OpenSSL QUIC stack is built on.
 
 **RSTREAM:** Receive stream. Internal receive buffer management object used to
 store data which has been RX'd but not yet read by the application.

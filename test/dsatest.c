@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -247,7 +247,7 @@ static int dsa_keygen_test(void)
         goto end;
     if (!TEST_ptr(pg_ctx = EVP_PKEY_CTX_new_from_name(NULL, "DSA", NULL))
         || !TEST_int_gt(EVP_PKEY_paramgen_init(pg_ctx), 0)
-        || !TEST_ptr_null(EVP_PKEY_CTX_gettable_params(pg_ctx))
+        || !TEST_ptr(EVP_PKEY_CTX_gettable_params(pg_ctx))
         || !TEST_ptr(settables = EVP_PKEY_CTX_settable_params(pg_ctx))
         || !TEST_ptr(OSSL_PARAM_locate_const(settables,
                                              OSSL_PKEY_PARAM_FFC_PBITS))
@@ -332,6 +332,7 @@ static int test_dsa_sig_infinite_loop(void)
     BIGNUM *p = NULL, *q = NULL, *g = NULL, *priv = NULL, *pub = NULL, *priv2 = NULL;
     BIGNUM *badq = NULL, *badpriv = NULL;
     const unsigned char msg[] = { 0x00 };
+    unsigned int signature_len0;
     unsigned int signature_len;
     unsigned char signature[64];
 
@@ -375,10 +376,13 @@ static int test_dsa_sig_infinite_loop(void)
         goto err;
 
     /* Test passing signature as NULL */
-    if (!TEST_true(DSA_sign(0, msg, sizeof(msg), NULL, &signature_len, dsa)))
+    if (!TEST_true(DSA_sign(0, msg, sizeof(msg), NULL, &signature_len0, dsa))
+        || !TEST_int_gt(signature_len0, 0))
         goto err;
 
-    if (!TEST_true(DSA_sign(0, msg, sizeof(msg), signature, &signature_len, dsa)))
+    if (!TEST_true(DSA_sign(0, msg, sizeof(msg), signature, &signature_len, dsa))
+        || !TEST_int_gt(signature_len, 0)
+        || !TEST_int_le(signature_len, signature_len0))
         goto err;
 
     /* Test using a private key of zero fails - this causes an infinite loop without the retry test */

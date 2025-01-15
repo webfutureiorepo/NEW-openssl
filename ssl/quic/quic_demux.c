@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2022-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -37,6 +37,9 @@ struct quic_demux_st {
      * in bytes.
      */
     size_t                      mtu;
+
+    /* The datagram_id to use for the next datagram we receive. */
+    uint64_t                    next_datagram_id;
 
     /* Time retrieval callback. */
     OSSL_TIME                 (*now)(void *arg);
@@ -300,6 +303,7 @@ static int demux_recv(QUIC_DEMUX *demux)
         urxe->data_len      = msg[i].data_len;
         /* Time we received datagram. */
         urxe->time          = now;
+        urxe->datagram_id   = demux->next_datagram_id++;
         /* Move from free list to pending list. */
         ossl_list_urxe_remove(&demux->urx_free, urxe);
         ossl_list_urxe_insert_tail(&demux->urx_pending, urxe);
@@ -438,6 +442,7 @@ int ossl_quic_demux_inject(QUIC_DEMUX *demux,
 
     /* Move from free list to pending list. */
     ossl_list_urxe_remove(&demux->urx_free, urxe);
+    urxe->datagram_id = demux->next_datagram_id++;
     ossl_list_urxe_insert_tail(&demux->urx_pending, urxe);
     urxe->demux_state = URXE_DEMUX_STATE_PENDING;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2001-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2001-2024 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright Siemens AG 2018-2020
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
@@ -67,6 +67,7 @@ struct ossl_http_req_ctx_st {
     time_t max_time;            /* Maximum end time of current transfer, or 0 */
     time_t max_total_time;      /* Maximum end time of total transfer, or 0 */
     char *redirection_url;      /* Location obtained from HTTP status 301/302 */
+    size_t max_hdr_lines;       /* Max. number of http hdr lines, or 0 */
 };
 
 /* HTTP states */
@@ -106,6 +107,7 @@ OSSL_HTTP_REQ_CTX *OSSL_HTTP_REQ_CTX_new(BIO *wbio, BIO *rbio, int buf_size)
     rctx->buf = OPENSSL_malloc(rctx->buf_size);
     rctx->wbio = wbio;
     rctx->rbio = rbio;
+    rctx->max_hdr_lines = OSSL_HTTP_DEFAULT_MAX_RESP_HDR_LINES;
     if (rctx->buf == NULL) {
         OPENSSL_free(rctx);
         return NULL;
@@ -355,6 +357,16 @@ int OSSL_HTTP_REQ_CTX_set1_req(OSSL_HTTP_REQ_CTX *rctx, const char *content_type
     return res;
 }
 
+void OSSL_HTTP_REQ_CTX_set_max_response_hdr_lines(OSSL_HTTP_REQ_CTX *rctx,
+                                                  size_t count)
+{
+    if (rctx == NULL) {
+        ERR_raise(ERR_LIB_HTTP, ERR_R_PASSED_NULL_PARAMETER);
+        return;
+    }
+    rctx->max_hdr_lines = count;
+}
+
 static int add1_headers(OSSL_HTTP_REQ_CTX *rctx,
                         const STACK_OF(CONF_VALUE) *headers, const char *host)
 {
@@ -537,6 +549,7 @@ int OSSL_HTTP_REQ_CTX_nbio(OSSL_HTTP_REQ_CTX *rctx)
     size_t resp_len;
     const unsigned char *p;
     char *buf, *key, *value, *line_end = NULL;
+    size_t resp_hdr_lines = 0;
 
     if (rctx == NULL) {
         ERR_raise(ERR_LIB_HTTP, ERR_R_PASSED_NULL_PARAMETER);
@@ -682,6 +695,14 @@ int OSSL_HTTP_REQ_CTX_nbio(OSSL_HTTP_REQ_CTX *rctx)
             return 0;
         }
 
+        resp_hdr_lines++;
+        if (rctx->max_hdr_lines != 0 && rctx->max_hdr_lines < resp_hdr_lines) {
+            ERR_raise(ERR_LIB_HTTP, HTTP_R_RESPONSE_TOO_MANY_HDRLINES);
+            OSSL_TRACE(HTTP, "Received too many headers\n");
+            rctx->state = OHS_ERROR;
+            return 0;
+        }
+
         /* Don't allow excessive lines */
         if (n == rctx->buf_size) {
             ERR_raise(ERR_LIB_HTTP, HTTP_R_RESPONSE_LINE_TOO_LONG);
@@ -785,6 +806,8 @@ int OSSL_HTTP_REQ_CTX_nbio(OSSL_HTTP_REQ_CTX *rctx)
             goto next_line;
         if (OSSL_TRACE_ENABLED(HTTP))
             OSSL_TRACE(HTTP, "]\n");
+
+        resp_hdr_lines = 0;
 
         if (rctx->keep_alive != 0 /* do not let server initiate keep_alive */
                 && !found_keep_alive /* otherwise there is no change */) {
@@ -905,6 +928,20 @@ int OSSL_HTTP_REQ_CTX_nbio_d2i(OSSL_HTTP_REQ_CTX *rctx,
 
 #ifndef OPENSSL_NO_SOCK
 
+static const char *explict_or_default_port(const char *hostserv, const char *port, int use_ssl)
+{
+    if (port == NULL) {
+        char *service = NULL;
+
+        if (!BIO_parse_hostserv(hostserv, NULL, &service, BIO_PARSE_PRIO_HOST))
+            return NULL;
+        if (service == NULL) /* implicit port */
+            port = use_ssl ? OSSL_HTTPS_PORT : OSSL_HTTP_PORT;
+        OPENSSL_free(service);
+    } /* otherwise take the explicitly given port */
+    return port;
+}
+
 /* set up a new connection BIO, to HTTP server or to HTTP(S) proxy if given */
 static BIO *http_new_bio(const char *server /* optionally includes ":port" */,
                          const char *server_port /* explicit server port */,
@@ -924,8 +961,7 @@ static BIO *http_new_bio(const char *server /* optionally includes ":port" */,
         port = proxy_port;
     }
 
-    if (port == NULL && strchr(host, ':') == NULL)
-        port = use_ssl ? OSSL_HTTPS_PORT : OSSL_HTTP_PORT;
+    port = explict_or_default_port(host, port, use_ssl);
 
     cbio = BIO_new_connect(host /* optionally includes ":port" */);
     if (cbio == NULL)
@@ -1012,8 +1048,6 @@ OSSL_HTTP_REQ_CTX *OSSL_HTTP_open(const char *server, const char *port,
         }
         if (port != NULL && *port == '\0')
             port = NULL;
-        if (port == NULL && strchr(server, ':') == NULL)
-            port = use_ssl ? OSSL_HTTPS_PORT : OSSL_HTTP_PORT;
         proxy = OSSL_HTTP_adapt_proxy(proxy, no_proxy, server, use_ssl);
         if (proxy != NULL
             && !OSSL_HTTP_parse_url(proxy, NULL /* use_ssl */, NULL /* user */,

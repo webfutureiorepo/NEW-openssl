@@ -1,5 +1,5 @@
 /*
- * Copyright 2007-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2007-2024 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright Nokia 2007-2019
  * Copyright Siemens AG 2015-2019
  *
@@ -100,6 +100,34 @@ int OSSL_CMP_MSG_get_bodytype(const OSSL_CMP_MSG *msg)
     return msg->body->type;
 }
 
+X509_PUBKEY *OSSL_CMP_MSG_get0_certreq_publickey(const OSSL_CMP_MSG *msg)
+{
+    const OSSL_CRMF_MSGS *reqs;
+    const OSSL_CRMF_MSG *crm;
+    const OSSL_CRMF_CERTTEMPLATE *tmpl;
+    X509_PUBKEY *pubkey;
+
+    switch (OSSL_CMP_MSG_get_bodytype(msg)) {
+    case OSSL_CMP_PKIBODY_IR:
+    case OSSL_CMP_PKIBODY_CR:
+    case OSSL_CMP_PKIBODY_KUR:
+        reqs = msg->body->value.ir; /* value.ir is same for cr and kur */
+        if ((crm = sk_OSSL_CRMF_MSG_value(reqs, 0)) == NULL) {
+            ERR_raise(ERR_LIB_CMP, CMP_R_CERTREQMSG_NOT_FOUND);
+            return NULL;
+        }
+        if ((tmpl = OSSL_CRMF_MSG_get0_tmpl(crm)) == NULL
+            || (pubkey = OSSL_CRMF_CERTTEMPLATE_get0_publicKey(tmpl)) == NULL) {
+            ERR_raise(ERR_LIB_CMP, CRMF_R_POPO_MISSING_PUBLIC_KEY);
+            return NULL;
+        }
+        return pubkey;
+    default:
+        ERR_raise(ERR_LIB_CMP, CMP_R_UNEXPECTED_PKIBODY);
+        return NULL;
+    }
+}
+
 /* Add an extension to the referenced extension stack, which may be NULL */
 static int add1_extension(X509_EXTENSIONS **pexts, int nid, int crit, void *ex)
 {
@@ -115,34 +143,6 @@ static int add1_extension(X509_EXTENSIONS **pexts, int nid, int crit, void *ex)
     res = X509v3_add_ext(pexts, ext, 0) != NULL;
     X509_EXTENSION_free(ext);
     return res;
-}
-
-/* Add extension list to the referenced extension stack, which may be NULL */
-static int add_extensions(STACK_OF(X509_EXTENSION) **target,
-                          const STACK_OF(X509_EXTENSION) *exts)
-{
-    int i;
-
-    if (target == NULL)
-        return 0;
-
-    for (i = 0; i < sk_X509_EXTENSION_num(exts); i++) {
-        X509_EXTENSION *ext = sk_X509_EXTENSION_value(exts, i);
-        ASN1_OBJECT *obj = X509_EXTENSION_get_object(ext);
-        int idx = X509v3_get_ext_by_OBJ(*target, obj, -1);
-
-        /* Does extension exist in target? */
-        if (idx != -1) {
-            /* Delete all extensions of same type */
-            do {
-                X509_EXTENSION_free(sk_X509_EXTENSION_delete(*target, idx));
-                idx = X509v3_get_ext_by_OBJ(*target, obj, -1);
-            } while (idx != -1);
-        }
-        if (!X509v3_add_ext(target, ext, -1))
-            return 0;
-    }
-    return 1;
 }
 
 /* Add a CRL revocation reason code to extension stack, which may be NULL */
@@ -330,8 +330,8 @@ OSSL_CRMF_MSG *OSSL_CMP_CTX_setup_CRM(OSSL_CMP_CTX *ctx, int for_KUR, int rid)
         != NULL
             && !add1_extension(&exts, NID_subject_alt_name, crit, default_sans))
         goto err;
-    if (ctx->reqExtensions != NULL /* augment/override existing ones */
-            && !add_extensions(&exts, ctx->reqExtensions))
+    if (sk_X509_EXTENSION_num(ctx->reqExtensions) > 0 /* augment/override existing ones */
+            && X509v3_add_extensions(&exts, ctx->reqExtensions) == NULL)
         goto err;
     if (sk_GENERAL_NAME_num(ctx->subjectAltNames) > 0
             && !add1_extension(&exts, NID_subject_alt_name,
@@ -542,8 +542,7 @@ OSSL_CMP_MSG *ossl_cmp_rr_new(OSSL_CMP_CTX *ctx)
     } else if (ctx->p10CSR != NULL) {
         pubkey = X509_REQ_get0_pubkey(ctx->p10CSR);
         subject = X509_REQ_get_subject_name(ctx->p10CSR);
-    }
-    else {
+    } else {
         goto err;
     }
 

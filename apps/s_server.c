@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2024 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved
  * Copyright 2005 Nokia. All rights reserved.
  *
@@ -8,6 +8,8 @@
  * in the file LICENSE in the source distribution or at
  * https://www.openssl.org/source/license.html
  */
+
+#include "internal/e_os.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -22,6 +24,7 @@
 #include <openssl/async.h>
 #include <openssl/ssl.h>
 #include <openssl/decoder.h>
+#include "internal/sockets.h" /* for openssl_fdset() */
 
 #ifndef OPENSSL_NO_SOCK
 
@@ -476,7 +479,10 @@ static int get_ocsp_resp_from_responder(SSL *s, tlsextstatusctx *srctx,
     char *proxy = NULL, *no_proxy = NULL;
     int use_ssl;
     STACK_OF(OPENSSL_STRING) *aia = NULL;
-    X509 *x = NULL;
+    X509 *x = NULL, *cert;
+    X509_NAME *iname;
+    STACK_OF(X509) *chain = NULL;
+    SSL_CTX *ssl_ctx;
     X509_STORE_CTX *inctx = NULL;
     X509_OBJECT *obj;
     OCSP_REQUEST *req = NULL;
@@ -487,6 +493,7 @@ static int get_ocsp_resp_from_responder(SSL *s, tlsextstatusctx *srctx,
 
     /* Build up OCSP query from server certificate */
     x = SSL_get_certificate(s);
+    iname = X509_get_issuer_name(x);
     aia = X509_get1_ocsp(x);
     if (aia != NULL) {
         if (!OSSL_HTTP_parse_url(sk_OPENSSL_STRING_value(aia, 0), &use_ssl,
@@ -511,21 +518,33 @@ static int get_ocsp_resp_from_responder(SSL *s, tlsextstatusctx *srctx,
     proxy = srctx->proxy;
     no_proxy = srctx->no_proxy;
 
-    inctx = X509_STORE_CTX_new();
-    if (inctx == NULL)
+    ssl_ctx = SSL_get_SSL_CTX(s);
+    if (!SSL_CTX_get0_chain_certs(ssl_ctx, &chain))
         goto err;
-    if (!X509_STORE_CTX_init(inctx,
-                             SSL_CTX_get_cert_store(SSL_get_SSL_CTX(s)),
-                             NULL, NULL))
-        goto err;
-    obj = X509_STORE_CTX_get_obj_by_subject(inctx, X509_LU_X509,
-                                            X509_get_issuer_name(x));
-    if (obj == NULL) {
-        BIO_puts(bio_err, "cert_status: Can't retrieve issuer certificate.\n");
-        goto done;
+    for (i = 0; i < sk_X509_num(chain); i++) {
+        /* check the untrusted certificate chain (-cert_chain option) */
+        cert = sk_X509_value(chain, i);
+        if (X509_name_cmp(iname, X509_get_subject_name(cert)) == 0) {
+            /* the issuer certificate is found */
+            id = OCSP_cert_to_id(NULL, x, cert);
+            break;
+        }
     }
-    id = OCSP_cert_to_id(NULL, x, X509_OBJECT_get0_X509(obj));
-    X509_OBJECT_free(obj);
+    if (id == NULL) {
+        inctx = X509_STORE_CTX_new();
+        if (inctx == NULL)
+            goto err;
+        if (!X509_STORE_CTX_init(inctx, SSL_CTX_get_cert_store(ssl_ctx),
+                                 NULL, NULL))
+            goto err;
+        obj = X509_STORE_CTX_get_obj_by_subject(inctx, X509_LU_X509, iname);
+        if (obj == NULL) {
+            BIO_puts(bio_err, "cert_status: Can't retrieve issuer certificate.\n");
+            goto done;
+        }
+        id = OCSP_cert_to_id(NULL, x, X509_OBJECT_get0_X509(obj));
+        X509_OBJECT_free(obj);
+    }
     if (id == NULL)
         goto err;
     req = OCSP_REQUEST_new();
@@ -1738,9 +1757,9 @@ int s_server_main(int argc, char *argv[])
         goto end;
     }
 #endif
-    if (early_data && (www > 0 || rev)) {
+    if (early_data && rev) {
         BIO_printf(bio_err,
-                   "Can't use -early_data in combination with -www, -WWW, -HTTP, or -rev\n");
+                   "Can't use -early_data in combination with -rev\n");
         goto end;
     }
 
@@ -3137,7 +3156,7 @@ static int www_body(int s, int stype, int prot, unsigned char *context)
     int i, j, k, dot;
     SSL *con;
     const SSL_CIPHER *c;
-    BIO *io, *ssl_bio, *sbio;
+    BIO *io, *ssl_bio, *sbio, *edio;
 #ifdef RENEG
     int total_bytes = 0;
 #endif
@@ -3159,7 +3178,8 @@ static int www_body(int s, int stype, int prot, unsigned char *context)
     p = buf = app_malloc(bufsize + 1, "server www buffer");
     io = BIO_new(BIO_f_buffer());
     ssl_bio = BIO_new(BIO_f_ssl());
-    if ((io == NULL) || (ssl_bio == NULL))
+    edio = BIO_new(BIO_s_mem());
+    if ((io == NULL) || (ssl_bio == NULL) || (edio == NULL))
         goto err;
 
     if (s_nbio) {
@@ -3219,6 +3239,12 @@ static int www_body(int s, int stype, int prot, unsigned char *context)
         goto err;
 
     io = BIO_push(filter, io);
+
+    filter = BIO_new(BIO_f_ebcdic_filter());
+    if (filter == NULL)
+        goto err;
+
+    edio = BIO_push(filter, edio);
 #endif
 
     if (s_debug) {
@@ -3235,8 +3261,35 @@ static int www_body(int s, int stype, int prot, unsigned char *context)
         SSL_set_msg_callback_arg(con, bio_s_msg ? bio_s_msg : bio_s_out);
     }
 
+    if (early_data) {
+        int edret = SSL_READ_EARLY_DATA_ERROR;
+        size_t readbytes;
+
+        while (edret != SSL_READ_EARLY_DATA_FINISH) {
+            for (;;) {
+                edret = SSL_read_early_data(con, buf, bufsize, &readbytes);
+                if (edret != SSL_READ_EARLY_DATA_ERROR)
+                    break;
+
+                switch (SSL_get_error(con, 0)) {
+                case SSL_ERROR_WANT_WRITE:
+                case SSL_ERROR_WANT_ASYNC:
+                case SSL_ERROR_WANT_READ:
+                    /* Just keep trying - busy waiting */
+                    continue;
+                default:
+                    BIO_printf(bio_err, "Error reading early data\n");
+                    ERR_print_errors(bio_err);
+                    goto err;
+                }
+            }
+            if (readbytes > 0)
+                BIO_write(edio, buf, (int)readbytes);
+        }
+    }
+
     for (;;) {
-        i = BIO_gets(io, buf, bufsize + 1);
+        i = BIO_gets(!BIO_eof(edio) ? edio : io, buf, bufsize + 1);
         if (i < 0) {            /* error */
             if (!BIO_should_retry(io) && !SSL_waiting_for_async(con)) {
                 if (!s_quiet)
@@ -3576,6 +3629,7 @@ static int www_body(int s, int stype, int prot, unsigned char *context)
     OPENSSL_free(buf);
     BIO_free(ssl_bio);
     BIO_free_all(io);
+    BIO_free_all(edio);
     return ret;
 }
 

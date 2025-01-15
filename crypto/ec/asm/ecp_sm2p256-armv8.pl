@@ -1,7 +1,7 @@
 #! /usr/bin/env perl
-# Copyright 2023 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2023-2024 The OpenSSL Project Authors. All Rights Reserved.
 #
-# Licensed under the OpenSSL license (the "License").  You may not use
+# Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
 # in the file LICENSE in the source distribution or at
 # https://www.openssl.org/source/license.html
@@ -23,7 +23,7 @@ open OUT,"| \"$^X\" $xlate $flavour \"$output\""
 my ($s0,$s1,$s2,$s3,$s4,$s5,$s6,$s7)=map("x$_",(7..14));
 my ($a8,$a10,$a12,$a14,$a9,$a11,$a13,$a15)=map("x$_",(7..14));
 my ($t0,$t1,$t2,$t3)=map("x$_",(3..6));
-my ($t4,$t5,$t6,$t7,$t8)=map("x$_",(15..19));
+my ($t4,$t5,$t6,$t7,$t8)=map("x$_",(15..17,19,20));
 
 sub bn_mod_add() {
 	my $mod = shift;
@@ -42,7 +42,8 @@ $code.=<<___;
 	adc $t4,xzr,xzr
 
 	// Load polynomial
-	adr x2,$mod
+	adrp x2,$mod
+	add x2,x2,:lo12:$mod
 	ldp $s4,$s5,[x2]
 	ldp $s6,$s7,[x2,#16]
 
@@ -88,7 +89,8 @@ $code.=<<___;
 	sbc $t4,xzr,xzr
 
 	// Load polynomial
-	adr x2,$mod
+	adrp x2,$mod
+	add x2,x2,:lo12:$mod
 	ldp $s4,$s5,[x2]
 	ldp $s6,$s7,[x2,#16]
 
@@ -134,7 +136,8 @@ $code.=<<___;
 	lsr $s3,$s3,#1
 
 	// Load mod
-	adr x2,$mod
+	adrp x2,$mod
+	add x2,x2,:lo12:$mod
 	ldp $s4,$s5,[x2]
 	ldp $s6,$s7,[x2,#16]
 
@@ -161,7 +164,7 @@ ___
 $code.=<<___;
 #include "arm_arch.h"
 .arch  armv8-a
-.text
+.rodata
 
 .align	5
 // The polynomial p
@@ -176,6 +179,8 @@ $code.=<<___;
 // (n + 1) / 2
 .Lord_div_2:
 .quad	0xa9ddfa049ceaa092,0xb901efb590e30295,0xffffffffffffffff,0x7fffffff7fffffff
+
+.text
 
 // void bn_rshift1(BN_ULONG *a);
 .globl	bn_rshift1
@@ -272,7 +277,8 @@ ecp_sm2p256_mul_by_3:
 	mov $t3,$s3
 
 	// Sub polynomial
-	adr x2,.Lpoly
+	adrp x2,.Lpoly
+	add x2,x2,:lo12:.Lpoly
 	ldp $s4,$s5,[x2]
 	ldp $s6,$s7,[x2,#16]
 	subs $s0,$s0,$s4
@@ -302,7 +308,8 @@ ecp_sm2p256_mul_by_3:
 	mov $t3,$s3
 
 	// Sub polynomial
-	adr x2,.Lpoly
+	adrp x2,.Lpoly
+	add x2,x2,:lo12:.Lpoly
 	ldp $s4,$s5,[x2]
 	ldp $s6,$s7,[x2,#16]
 	subs $s0,$s0,$s4
@@ -508,7 +515,8 @@ $code.=<<___;
 	mov $s6,$s2
 	mov $s7,$s3
 
-	adr $t0,.Lpoly
+	adrp $t0,.Lpoly
+	add $t0,$t0,:lo12:.Lpoly
 	ldp $t1,$t2,[$t0]
 	ldp $t3,$t4,[$t0,#16]
 
@@ -537,7 +545,7 @@ ecp_sm2p256_mul:
 	stp x29,x30,[sp,#-80]!
 	add x29,sp,#0
 	stp x16,x17,[sp,#16]
-	stp x18,x19,[sp,#64]
+	stp x19,x20,[sp,#64]
 
 	// Load inputs
 	ldp $s0,$s1,[x1]
@@ -678,7 +686,7 @@ ecp_sm2p256_mul:
 
 	// Restore scalar registers
 	ldp x16,x17,[sp,#16]
-	ldp x18,x19,[sp,#64]
+	ldp x19,x20,[sp,#64]
 	ldp x29,x30,[sp],#80
 
 	AARCH64_VALIDATE_LINK_REGISTER
@@ -696,7 +704,7 @@ ecp_sm2p256_sqr:
 	stp x29,x30,[sp,#-80]!
 	add x29,sp,#0
 	stp x16,x17,[sp,#16]
-	stp x18,x19,[sp,#64]
+	stp x19,x20,[sp,#64]
 
 	// Load inputs
 	ldp $s4,$s5,[x1]
@@ -806,7 +814,7 @@ ecp_sm2p256_sqr:
 
 	// Restore scalar registers
 	ldp x16,x17,[sp,#16]
-	ldp x18,x19,[sp,#64]
+	ldp x19,x20,[sp,#64]
 	ldp x29,x30,[sp],#80
 
 	AARCH64_VALIDATE_LINK_REGISTER

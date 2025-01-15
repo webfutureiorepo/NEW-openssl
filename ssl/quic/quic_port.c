@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2023-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -220,7 +220,7 @@ static int port_update_poll_desc(QUIC_PORT *port, BIO *net_bio, int for_write)
      * single pollable currently. In the future, once complete polling
      * infrastructure has been implemented, this limitation can be removed.
      *
-     * For now, just update the descriptor on the the engine's reactor as we are
+     * For now, just update the descriptor on the engine's reactor as we are
      * guaranteed to be the only port under it.
      */
     if (for_write)
@@ -273,7 +273,7 @@ int ossl_quic_port_set_net_wbio(QUIC_PORT *port, BIO *net_wbio)
     if (!port_update_poll_desc(port, net_wbio, /*for_write=*/1))
         return 0;
 
-    LIST_FOREACH(ch, ch, &port->channel_list)
+    OSSL_LIST_FOREACH(ch, ch, &port->channel_list)
         ossl_qtx_set_bio(ch->qtx, net_wbio);
 
     port->net_wbio = net_wbio;
@@ -290,7 +290,7 @@ static SSL *port_new_handshake_layer(QUIC_PORT *port)
     SSL *tls = NULL;
     SSL_CONNECTION *tls_conn = NULL;
 
-    tls = ossl_ssl_connection_new_int(port->channel_ctx, TLS_method());
+    tls = ossl_ssl_connection_new_int(port->channel_ctx, NULL, TLS_method());
     if (tls == NULL || (tls_conn = SSL_CONNECTION_FROM_SSL(tls)) == NULL)
         return NULL;
 
@@ -315,6 +315,11 @@ static QUIC_CHANNEL *port_make_channel(QUIC_PORT *port, SSL *tls, int is_server)
     args.srtm       = port->srtm;
     if (args.tls == NULL)
         return NULL;
+
+#ifndef OPENSSL_NO_QLOG
+    args.use_qlog   = 1; /* disabled if env not set */
+    args.qlog_title = args.tls->ctx->qlog_title;
+#endif
 
     ch = ossl_quic_channel_new(&args);
     if (ch == NULL) {
@@ -368,7 +373,7 @@ void ossl_quic_port_subtick(QUIC_PORT *port, QUIC_TICK_RESULT *res,
             port_rx_pre(port);
 
         /* Iterate through all channels and service them. */
-        LIST_FOREACH(ch, ch, &port->channel_list) {
+        OSSL_LIST_FOREACH(ch, ch, &port->channel_list) {
             QUIC_TICK_RESULT subr = {0};
 
             ossl_quic_channel_subtick(ch, &subr, flags);
@@ -598,7 +603,7 @@ void ossl_quic_port_raise_net_error(QUIC_PORT *port,
     if (triggering_ch != NULL)
         ossl_quic_channel_raise_net_error(triggering_ch);
 
-    LIST_FOREACH(ch, ch, &port->channel_list)
+    OSSL_LIST_FOREACH(ch, ch, &port->channel_list)
         if (ch != triggering_ch)
             ossl_quic_channel_raise_net_error(ch);
 }

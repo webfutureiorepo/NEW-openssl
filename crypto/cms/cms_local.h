@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2008-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -100,6 +100,8 @@ struct CMS_SignerInfo_st {
     EVP_MD_CTX *mctx;
     EVP_PKEY_CTX *pctx;
     const CMS_CTX *cms_ctx;
+    /* Set to 1 if signing time attribute is to be omitted */
+    int omit_signing_time;
 };
 
 struct CMS_SignerIdentifier_st {
@@ -366,6 +368,7 @@ struct CMS_Receipt_st {
 
 DECLARE_ASN1_FUNCTIONS(CMS_ContentInfo)
 DECLARE_ASN1_ITEM(CMS_SignerInfo)
+DECLARE_ASN1_ITEM(CMS_EncryptedContentInfo)
 DECLARE_ASN1_ITEM(CMS_IssuerAndSerialNumber)
 DECLARE_ASN1_ITEM(CMS_Attributes_Sign)
 DECLARE_ASN1_ITEM(CMS_Attributes_Verify)
@@ -447,7 +450,6 @@ BIO *ossl_cms_EnvelopedData_init_bio(CMS_ContentInfo *cms);
 int ossl_cms_EnvelopedData_final(CMS_ContentInfo *cms, BIO *chain);
 BIO *ossl_cms_AuthEnvelopedData_init_bio(CMS_ContentInfo *cms);
 int ossl_cms_AuthEnvelopedData_final(CMS_ContentInfo *cms, BIO *cmsbio);
-void ossl_cms_env_enc_content_free(const CMS_ContentInfo *cinf);
 CMS_EnvelopedData *ossl_cms_get0_enveloped(CMS_ContentInfo *cms);
 CMS_AuthEnvelopedData *ossl_cms_get0_auth_enveloped(CMS_ContentInfo *cms);
 CMS_EncryptedContentInfo *ossl_cms_get0_env_enc_content(const CMS_ContentInfo *cms);
@@ -484,6 +486,9 @@ int ossl_cms_dh_envelope(CMS_RecipientInfo *ri, int decrypt);
 int ossl_cms_ecdh_envelope(CMS_RecipientInfo *ri, int decrypt);
 int ossl_cms_rsa_envelope(CMS_RecipientInfo *ri, int decrypt);
 int ossl_cms_rsa_sign(CMS_SignerInfo *si, int verify);
+
+int ossl_cms_get1_certs_ex(CMS_ContentInfo *cms, STACK_OF(X509) **certs);
+int ossl_cms_get1_crls_ex(CMS_ContentInfo *cms, STACK_OF(X509_CRL) **crls);
 
 DECLARE_ASN1_ITEM(CMS_CertificateChoices)
 DECLARE_ASN1_ITEM(CMS_DigestedData)

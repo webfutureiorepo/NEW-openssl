@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2020-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -227,6 +227,12 @@ int ossl_rsa_fromdata(RSA *rsa, const OSSL_PARAM params[], int include_private)
                            sk_BIGNUM_num(coeffs));
             goto err;
         }
+    }
+
+    if (!ossl_rsa_check_factors(rsa)) {
+        ERR_raise_data(ERR_LIB_RSA, RSA_R_INVALID_KEYPAIR,
+                       "RSA factors/exponents are too big for for n-modulus\n");
+        goto err;
     }
 
     BN_clear_free(p);

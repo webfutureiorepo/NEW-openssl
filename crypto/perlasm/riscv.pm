@@ -2,7 +2,7 @@
 # This file is dual-licensed, meaning that you can use it under your
 # choice of either of the following two licenses:
 #
-# Copyright 2023 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2023-2024 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License"). You can obtain
 # a copy in the file LICENSE in the source distribution or at
@@ -384,6 +384,36 @@ sub rev8 {
     return ".word ".($template | ($rs << 15) | ($rd << 7));
 }
 
+sub roriw {
+    # Encoding for roriw rd, rs1, shamt instruction on RV64
+    #               XXXXXXX_ shamt _ rs1 _XXX_ rd  _XXXXXXX
+    my $template = 0b0110000_00000_00000_101_00000_0011011;
+    my $rd = read_reg shift;
+    my $rs1 = read_reg shift;
+    my $shamt = shift;
+    return ".word ".($template | ($shamt << 20) | ($rs1 << 15) | ($rd << 7));
+}
+
+sub maxu {
+    # Encoding for maxu rd, rs1, rs2 instruction on RV64
+    #               XXXXXXX_ rs2 _ rs1 _XXX_ rd  _XXXXXXX
+    my $template = 0b0000101_00000_00000_111_00000_0110011;
+    my $rd = read_reg shift;
+    my $rs1 = read_reg shift;
+    my $rs2 = read_reg shift;
+    return ".word ".($template | ($rs2 << 20) | ($rs1 << 15) | ($rd << 7));
+}
+
+sub minu {
+    # Encoding for minu rd, rs1, rs2 instruction on RV64
+    #               XXXXXXX_ rs2 _ rs1 _XXX_ rd  _XXXXXXX
+    my $template = 0b0000101_00000_00000_101_00000_0110011;
+    my $rd = read_reg shift;
+    my $rs1 = read_reg shift;
+    my $rs2 = read_reg shift;
+    return ".word ".($template | ($rs2 << 20) | ($rs1 << 15) | ($rd << 7));
+}
+
 # Vector instructions
 
 sub vadd_vv {
@@ -568,6 +598,15 @@ sub vmv_v_v {
     return ".word ".($template | ($vs1 << 15) | ($vd << 7));
 }
 
+sub vor_vv {
+    # vor.vv vd, vs2, vs1
+    my $template = 0b0010101_00000_00000_000_00000_1010111;
+    my $vd = read_vreg shift;
+    my $vs2 = read_vreg shift;
+    my $vs1 = read_vreg shift;
+    return ".word ".($template | ($vs2 << 20) | ($vs1 << 15) | ($vd << 7));
+}
+
 sub vor_vv_v0t {
     # vor.vv vd, vs2, vs1, v0.t
     my $template = 0b0010100_00000_00000_000_00000_1010111;
@@ -711,6 +750,15 @@ sub vslideup_vi {
 sub vsll_vi {
     # vsll.vi vd, vs2, uimm, vm
     my $template = 0b1001011_00000_00000_011_00000_1010111;
+    my $vd = read_vreg shift;
+    my $vs2 = read_vreg shift;
+    my $uimm = shift;
+    return ".word ".($template | ($vs2 << 20) | ($uimm << 15) | ($vd << 7));
+}
+
+sub vsrl_vi {
+    # vsrl.vi vd, vs2, uimm, vm
+    my $template = 0b1010001_00000_00000_011_00000_1010111;
     my $vd = read_vreg shift;
     my $vs2 = read_vreg shift;
     my $uimm = shift;

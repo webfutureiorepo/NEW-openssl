@@ -1,5 +1,5 @@
 /*
- * Copyright 2018-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2018-2024 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright (c) 2018-2019, Oracle and/or its affiliates.  All rights reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
@@ -147,11 +147,15 @@ int ossl_rsa_fips186_4_gen_prob_primes(RSA *rsa, RSA_ACVP_TEST *test,
     ret = 1;
 err:
     /* Zeroize any internally generated values that are not returned */
-    if (Xpo != NULL)
-        BN_clear(Xpo);
-    if (Xqo != NULL)
-        BN_clear(Xqo);
+    BN_clear(Xpo);
+    BN_clear(Xqo);
     BN_clear(tmp);
+    if (ret != 1) {
+        BN_clear_free(rsa->p);
+        rsa->p = NULL;
+        BN_clear_free(rsa->q);
+        rsa->q = NULL;
+    }
 
     BN_CTX_end(ctx);
     return ret;

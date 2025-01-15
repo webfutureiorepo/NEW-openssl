@@ -112,7 +112,8 @@ static int print_labeled_bignum(BIO *out, const char *label, const BIGNUM *bn)
             use_sep = 0; /* The first byte on the next line doesn't have a : */
         }
         if (BIO_printf(out, "%s%c%c", use_sep ? ":" : "",
-                       tolower(p[0]), tolower(p[1])) <= 0)
+                       tolower((unsigned char)p[0]),
+                       tolower((unsigned char)p[1])) <= 0)
             goto err;
         ++bytes;
         p += 2;
@@ -281,9 +282,6 @@ static int dh_to_text(BIO *out, const void *key, int selection)
 
     return 1;
 }
-
-# define dh_input_type          "DH"
-# define dhx_input_type         "DHX"
 #endif
 
 /* ---------------------------------------------------------------------- */
@@ -351,8 +349,6 @@ static int dsa_to_text(BIO *out, const void *key, int selection)
 
     return 1;
 }
-
-# define dsa_input_type         "DSA"
 #endif
 
 /* ---------------------------------------------------------------------- */
@@ -556,12 +552,6 @@ err:
     OPENSSL_free(pub);
     return ret;
 }
-
-# define ec_input_type          "EC"
-
-# ifndef OPENSSL_NO_SM2
-#  define sm2_input_type        "SM2"
-# endif
 #endif
 
 /* ---------------------------------------------------------------------- */
@@ -619,10 +609,6 @@ static int ecx_to_text(BIO *out, const void *key, int selection)
     return 1;
 }
 
-# define ed25519_input_type     "ED25519"
-# define ed448_input_type       "ED448"
-# define x25519_input_type      "X25519"
-# define x448_input_type        "X448"
 #endif
 
 /* ---------------------------------------------------------------------- */
@@ -778,9 +764,6 @@ static int rsa_to_text(BIO *out, const void *key, int selection)
     sk_BIGNUM_const_free(coeffs);
     return ret;
 }
-
-#define rsa_input_type          "RSA"
-#define rsapss_input_type       "RSA-PSS"
 
 /* ---------------------------------------------------------------------- */
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2023-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -310,7 +310,7 @@ void ossl_quic_rcidm_free(QUIC_RCIDM *rcidm)
     while ((rcid = ossl_pqueue_RCID_pop(rcidm->rcids)) != NULL)
         OPENSSL_free(rcid);
 
-    LIST_FOREACH_DELSAFE(rcid, rnext, retiring, &rcidm->retiring_list)
+    OSSL_LIST_FOREACH_DELSAFE(rcid, rnext, retiring, &rcidm->retiring_list)
         OPENSSL_free(rcid);
 
     ossl_pqueue_RCID_free(rcidm->rcids);

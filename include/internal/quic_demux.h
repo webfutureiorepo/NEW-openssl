@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2022-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -105,6 +105,12 @@ struct quic_urxe_st {
      * has already been removed. Used by QRX only; not used by the demuxer.
      */
     uint64_t        processed, hpr_removed;
+
+    /*
+     * This monotonically increases with each datagram received. It is used for
+     * diagnostic purposes only.
+     */
+    uint64_t        datagram_id;
 
     /*
      * Address of peer we received the datagram from, and the local interface

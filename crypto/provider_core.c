@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2019-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -32,6 +32,7 @@
 #include "crypto/context.h"
 #ifndef FIPS_MODULE
 # include <openssl/self_test.h>
+# include <openssl/indicator.h>
 #endif
 
 /*
@@ -446,13 +447,11 @@ static OSSL_PROVIDER *provider_new(const char *name,
         OPENSSL_free(prov);
         return NULL;
     }
-#ifndef HAVE_ATOMICS
     if ((prov->activatecnt_lock = CRYPTO_THREAD_lock_new()) == NULL) {
         ossl_provider_free(prov);
         ERR_raise(ERR_LIB_CRYPTO, ERR_R_CRYPTO_LIB);
         return NULL;
     }
-#endif
 
     if ((prov->opbits_lock = CRYPTO_THREAD_lock_new()) == NULL
         || (prov->flag_lock = CRYPTO_THREAD_lock_new()) == NULL
@@ -566,8 +565,10 @@ OSSL_PROVIDER *ossl_provider_new(OSSL_LIB_CTX *libctx, const char *name,
             if (params[i].data_type != OSSL_PARAM_UTF8_STRING)
                 continue;
             if (ossl_provider_info_add_parameter(&template, params[i].key,
-                                                 (char *)params[i].data) <= 0)
+                                                 (char *)params[i].data) <= 0) {
+                sk_INFOPAIR_pop_free(template.parameters, infopair_free);
                 return NULL;
+            }
         }
     }
 
@@ -579,6 +580,11 @@ OSSL_PROVIDER *ossl_provider_new(OSSL_LIB_CTX *libctx, const char *name,
 
     if (prov == NULL)
         return NULL;
+
+    if (!ossl_provider_set_module_path(prov, template.path)) {
+        ossl_provider_free(prov);
+        return NULL;
+    }
 
     prov->libctx = libctx;
 #ifndef FIPS_MODULE
@@ -742,9 +748,7 @@ void ossl_provider_free(OSSL_PROVIDER *prov)
             sk_INFOPAIR_pop_free(prov->parameters, infopair_free);
             CRYPTO_THREAD_lock_free(prov->opbits_lock);
             CRYPTO_THREAD_lock_free(prov->flag_lock);
-#ifndef HAVE_ATOMICS
             CRYPTO_THREAD_lock_free(prov->activatecnt_lock);
-#endif
             CRYPTO_FREE_REF(&prov->refcnt);
             OPENSSL_free(prov);
         }
@@ -917,7 +921,7 @@ static int provider_init(OSSL_PROVIDER *prov)
             if (load_dir == NULL) {
                 load_dir = ossl_safe_getenv("OPENSSL_MODULES");
                 if (load_dir == NULL)
-                    load_dir = MODULESDIR;
+                    load_dir = ossl_get_modulesdir();
             }
 
             DSO_ctrl(prov->module, DSO_CTRL_SET_FLAGS,
@@ -960,6 +964,12 @@ static int provider_init(OSSL_PROVIDER *prov)
                        prov->name);
         goto end;
     }
+#ifndef FIPS_MODULE
+    OSSL_TRACE_BEGIN(PROVIDER) {
+        BIO_printf(trc_out,
+                   "(provider %s) initalizing\n", prov->name);
+    } OSSL_TRACE_END(PROVIDER);
+#endif
 
     if (!prov->init_function((OSSL_CORE_HANDLE *)prov, core_dispatch,
                              &provider_dispatch, &tmp_provctx)) {
@@ -1608,59 +1618,248 @@ OSSL_LIB_CTX *ossl_provider_libctx(const OSSL_PROVIDER *prov)
     return prov != NULL ? prov->libctx : NULL;
 }
 
-/* Wrappers around calls to the provider */
+/**
+ * @brief Tears down the given provider.
+ *
+ * This function calls the `teardown` callback of the given provider to release
+ * any resources associated with it. The teardown is skipped if the callback is
+ * not defined or, in non-FIPS builds, if the provider is a child.
+ *
+ * @param prov Pointer to the OSSL_PROVIDER structure representing the provider.
+ *
+ * If tracing is enabled, a message is printed indicating that the teardown is
+ * being called.
+ */
 void ossl_provider_teardown(const OSSL_PROVIDER *prov)
 {
     if (prov->teardown != NULL
 #ifndef FIPS_MODULE
             && !prov->ischild
 #endif
-       )
+        ) {
+#ifndef FIPS_MODULE
+        OSSL_TRACE_BEGIN(PROVIDER) {
+            BIO_printf(trc_out, "(provider %s) calling teardown\n",
+                       ossl_provider_name(prov));
+        } OSSL_TRACE_END(PROVIDER);
+#endif
         prov->teardown(prov->provctx);
+    }
 }
 
+/**
+ * @brief Retrieves the parameters that can be obtained from a provider.
+ *
+ * This function calls the `gettable_params` callback of the given provider to
+ * get a list of parameters that can be retrieved.
+ *
+ * @param prov Pointer to the OSSL_PROVIDER structure representing the provider.
+ *
+ * @return Pointer to an array of OSSL_PARAM structures that represent the
+ *         gettable parameters, or NULL if the callback is not defined.
+ *
+ * If tracing is enabled, the gettable parameters are printed for debugging.
+ */
 const OSSL_PARAM *ossl_provider_gettable_params(const OSSL_PROVIDER *prov)
 {
-    return prov->gettable_params == NULL
-        ? NULL : prov->gettable_params(prov->provctx);
+    const OSSL_PARAM *ret = NULL;
+
+    if (prov->gettable_params != NULL)
+        ret = prov->gettable_params(prov->provctx);
+
+#ifndef FIPS_MODULE
+    OSSL_TRACE_BEGIN(PROVIDER) {
+        char *buf = NULL;
+
+        BIO_printf(trc_out, "(provider %s) gettable params\n",
+                   ossl_provider_name(prov));
+        BIO_printf(trc_out, "Parameters:\n");
+        if (prov->gettable_params != NULL) {
+            if (!OSSL_PARAM_print_to_bio(ret, trc_out, 0))
+                BIO_printf(trc_out, "Failed to parse param values\n");
+            OPENSSL_free(buf);
+        } else {
+            BIO_printf(trc_out, "Provider doesn't implement gettable_params\n");
+        }
+    } OSSL_TRACE_END(PROVIDER);
+#endif
+
+    return ret;
 }
 
+/**
+ * @brief Retrieves parameters from a provider.
+ *
+ * This function calls the `get_params` callback of the given provider to
+ * retrieve its parameters. If the callback is defined, it is invoked with the
+ * provider context and the parameters array.
+ *
+ * @param prov Pointer to the OSSL_PROVIDER structure representing the provider.
+ * @param params Array of OSSL_PARAM structures to store the retrieved parameters.
+ *
+ * @return 1 on success, 0 if the `get_params` callback is not defined or fails.
+ *
+ * If tracing is enabled, the retrieved parameters are printed for debugging.
+ */
 int ossl_provider_get_params(const OSSL_PROVIDER *prov, OSSL_PARAM params[])
-{
-    return prov->get_params == NULL
-        ? 0 : prov->get_params(prov->provctx, params);
-}
-
-int ossl_provider_self_test(const OSSL_PROVIDER *prov)
 {
     int ret;
 
-    if (prov->self_test == NULL)
-        return 1;
-    ret = prov->self_test(prov->provctx);
+    if (prov->get_params == NULL)
+        return 0;
+
+    ret = prov->get_params(prov->provctx, params);
+#ifndef FIPS_MODULE
+    OSSL_TRACE_BEGIN(PROVIDER) {
+
+        BIO_printf(trc_out,
+                   "(provider %s) calling get_params\n", prov->name);
+        if (ret == 1) {
+            BIO_printf(trc_out, "Parameters:\n");
+            if (!OSSL_PARAM_print_to_bio(params, trc_out, 1))
+                BIO_printf(trc_out, "Failed to parse param values\n");
+        } else {
+            BIO_printf(trc_out, "get_params call failed\n");
+        }
+    } OSSL_TRACE_END(PROVIDER);
+#endif
+    return ret;
+}
+
+/**
+ * @brief Performs a self-test on the given provider.
+ *
+ * This function calls the `self_test` callback of the given provider to
+ * perform a self-test. If the callback is not defined, it assumes the test
+ * passed.
+ *
+ * @param prov Pointer to the OSSL_PROVIDER structure representing the provider.
+ *
+ * @return 1 if the self-test passes or the callback is not defined, 0 on failure.
+ *
+ * If tracing is enabled, the result of the self-test is printed for debugging.
+ * If the test fails, the provider's store methods are removed.
+ */
+int ossl_provider_self_test(const OSSL_PROVIDER *prov)
+{
+    int ret = 1;
+
+    if (prov->self_test != NULL)
+        ret = prov->self_test(prov->provctx);
+
+#ifndef FIPS_MODULE
+    OSSL_TRACE_BEGIN(PROVIDER) {
+        if (prov->self_test != NULL) 
+            BIO_printf(trc_out,
+                       "(provider %s) Calling self_test, ret = %d\n",
+                       prov->name, ret);
+        else
+            BIO_printf(trc_out,
+                       "(provider %s) doesn't implement self_test\n",
+                       prov->name);
+    } OSSL_TRACE_END(PROVIDER);
+#endif
     if (ret == 0)
         (void)provider_remove_store_methods((OSSL_PROVIDER *)prov);
     return ret;
 }
 
+/**
+ * @brief Retrieves capabilities from the given provider.
+ *
+ * This function calls the `get_capabilities` callback of the specified provider
+ * to retrieve capabilities information. The callback is invoked with the
+ * provider context, capability name, a callback function, and an argument.
+ *
+ * @param prov Pointer to the OSSL_PROVIDER structure representing the provider.
+ * @param capability String representing the capability to be retrieved.
+ * @param cb Callback function to process the capability data.
+ * @param arg Argument to be passed to the callback function.
+ *
+ * @return 1 if the capabilities are successfully retrieved or if the callback
+ *         is not defined, otherwise the value returned by `get_capabilities`.
+ *
+ * If tracing is enabled, a message is printed indicating the requested
+ * capabilities.
+ */
 int ossl_provider_get_capabilities(const OSSL_PROVIDER *prov,
                                    const char *capability,
                                    OSSL_CALLBACK *cb,
                                    void *arg)
 {
-    return prov->get_capabilities == NULL
-        ? 1 : prov->get_capabilities(prov->provctx, capability, cb, arg);
+    if (prov->get_capabilities != NULL) {
+#ifndef FIPS_MODULE
+        OSSL_TRACE_BEGIN(PROVIDER) {
+            BIO_printf(trc_out,
+                       "(provider %s) Calling get_capabilities "
+                       "with capabilities %s\n", prov->name,
+                       capability == NULL ? "none" : capability);
+        } OSSL_TRACE_END(PROVIDER);
+#endif
+        return prov->get_capabilities(prov->provctx, capability, cb, arg);
+    }
+    return 1;
 }
 
+/**
+ * @brief Queries the provider for available algorithms for a given operation.
+ *
+ * This function calls the `query_operation` callback of the specified provider
+ * to obtain a list of algorithms that can perform the given operation. It may
+ * also set a flag indicating whether the result should be cached.
+ *
+ * @param prov Pointer to the OSSL_PROVIDER structure representing the provider.
+ * @param operation_id Identifier of the operation to query.
+ * @param no_cache Pointer to an integer flag to indicate whether caching is allowed.
+ *
+ * @return Pointer to an array of OSSL_ALGORITHM structures representing the
+ *         available algorithms, or NULL if the callback is not defined or
+ *         there are no available algorithms.
+ *
+ * If tracing is enabled, the available algorithms and their properties are
+ * printed for debugging.
+ */
 const OSSL_ALGORITHM *ossl_provider_query_operation(const OSSL_PROVIDER *prov,
                                                     int operation_id,
                                                     int *no_cache)
 {
     const OSSL_ALGORITHM *res;
 
-    if (prov->query_operation == NULL)
+    if (prov->query_operation == NULL) {
+#ifndef FIPS_MODULE
+        OSSL_TRACE_BEGIN(PROVIDER) {
+            BIO_printf(trc_out, "provider %s lacks query operation!\n",
+                       prov->name);
+        } OSSL_TRACE_END(PROVIDER);
+#endif
         return NULL;
+    }
+
     res = prov->query_operation(prov->provctx, operation_id, no_cache);
+#ifndef FIPS_MODULE
+    OSSL_TRACE_BEGIN(PROVIDER) {
+        const OSSL_ALGORITHM *idx;
+        if (res != NULL) {
+            BIO_printf(trc_out,
+                       "(provider %s) Calling query, available algs are:\n", prov->name);
+
+            for (idx = res; idx->algorithm_names != NULL; idx++) {
+                BIO_printf(trc_out,
+                           "(provider %s) names %s, prop_def %s, desc %s\n",
+                           prov->name,
+                           res->algorithm_names == NULL ? "none" :
+                           res->algorithm_names,
+                           res->property_definition == NULL ? "none" :
+                           res->property_definition,
+                           res->algorithm_description == NULL ? "none" :
+                           res->algorithm_description);
+            }
+        } else {
+            BIO_printf(trc_out, "(provider %s) query_operation failed\n", prov->name);
+        }
+    } OSSL_TRACE_END(PROVIDER);
+#endif
+
 #if defined(OPENSSL_NO_CACHED_FETCH)
     /* Forcing the non-caching of queries */
     if (no_cache != NULL)
@@ -1669,12 +1868,36 @@ const OSSL_ALGORITHM *ossl_provider_query_operation(const OSSL_PROVIDER *prov,
     return res;
 }
 
+/**
+ * @brief Releases resources associated with a queried operation.
+ *
+ * This function calls the `unquery_operation` callback of the specified
+ * provider to release any resources related to a previously queried operation.
+ *
+ * @param prov Pointer to the OSSL_PROVIDER structure representing the provider.
+ * @param operation_id Identifier of the operation to unquery.
+ * @param algs Pointer to the OSSL_ALGORITHM structures representing the
+ *             algorithms associated with the operation.
+ *
+ * If tracing is enabled, a message is printed indicating that the operation
+ * is being unqueried.
+ */
 void ossl_provider_unquery_operation(const OSSL_PROVIDER *prov,
                                      int operation_id,
                                      const OSSL_ALGORITHM *algs)
 {
-    if (prov->unquery_operation != NULL)
+    if (prov->unquery_operation != NULL) {
+#ifndef FIPS_MODULE
+        OSSL_TRACE_BEGIN(PROVIDER) {
+            BIO_printf(trc_out,
+                       "(provider %s) Calling unquery"
+                       " with operation %d\n",
+                       prov->name,
+                       operation_id);
+        } OSSL_TRACE_END(PROVIDER);
+#endif
         prov->unquery_operation(prov->provctx, operation_id, algs);
+    }
 }
 
 int ossl_provider_set_operation_bit(OSSL_PROVIDER *provider, size_t bitnum)
@@ -1931,6 +2154,7 @@ OSSL_FUNC_BIO_up_ref_fn ossl_core_bio_up_ref;
 OSSL_FUNC_BIO_free_fn ossl_core_bio_free;
 OSSL_FUNC_BIO_vprintf_fn ossl_core_bio_vprintf;
 OSSL_FUNC_BIO_vsnprintf_fn BIO_vsnprintf;
+static OSSL_FUNC_indicator_cb_fn core_indicator_get_callback;
 static OSSL_FUNC_self_test_cb_fn core_self_test_get_callback;
 static OSSL_FUNC_get_entropy_fn rand_get_entropy;
 static OSSL_FUNC_get_user_entropy_fn rand_get_user_entropy;
@@ -2094,6 +2318,12 @@ static int core_pop_error_to_mark(const OSSL_CORE_HANDLE *handle)
     return ERR_pop_to_mark();
 }
 
+static void core_indicator_get_callback(OPENSSL_CORE_CTX *libctx,
+                                        OSSL_INDICATOR_CALLBACK **cb)
+{
+    OSSL_INDICATOR_get_callback((OSSL_LIB_CTX *)libctx, cb);
+}
+
 static void core_self_test_get_callback(OPENSSL_CORE_CTX *libctx,
                                         OSSL_CALLBACK **cb, void **cbarg)
 {
@@ -2255,6 +2485,7 @@ static const OSSL_DISPATCH core_dispatch_[] = {
     { OSSL_FUNC_BIO_VPRINTF, (void (*)(void))ossl_core_bio_vprintf },
     { OSSL_FUNC_BIO_VSNPRINTF, (void (*)(void))BIO_vsnprintf },
     { OSSL_FUNC_SELF_TEST_CB, (void (*)(void))core_self_test_get_callback },
+    { OSSL_FUNC_INDICATOR_CB, (void (*)(void))core_indicator_get_callback },
     { OSSL_FUNC_GET_ENTROPY, (void (*)(void))rand_get_entropy },
     { OSSL_FUNC_GET_USER_ENTROPY, (void (*)(void))rand_get_user_entropy },
     { OSSL_FUNC_CLEANUP_ENTROPY, (void (*)(void))rand_cleanup_entropy },

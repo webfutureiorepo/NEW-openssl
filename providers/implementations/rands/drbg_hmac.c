@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2011-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -316,6 +316,8 @@ static int drbg_hmac_new(PROV_DRBG *drbg)
     if (hmac == NULL)
         return 0;
 
+    OSSL_FIPS_IND_INIT(drbg)
+
     drbg->data = hmac;
     /* See SP800-57 Part1 Rev4 5.6.1 Table 3 */
     drbg->max_entropylen = DRBG_MAX_LENGTH;
@@ -331,7 +333,8 @@ static int drbg_hmac_new(PROV_DRBG *drbg)
 static void *drbg_hmac_new_wrapper(void *provctx, void *parent,
                                    const OSSL_DISPATCH *parent_dispatch)
 {
-    return ossl_rand_drbg_new(provctx, parent, parent_dispatch, &drbg_hmac_new,
+    return ossl_rand_drbg_new(provctx, parent, parent_dispatch,
+                              &drbg_hmac_new, &drbg_hmac_free,
                               &drbg_hmac_instantiate, &drbg_hmac_uninstantiate,
                               &drbg_hmac_reseed, &drbg_hmac_generate);
 }
@@ -398,6 +401,7 @@ static const OSSL_PARAM *drbg_hmac_gettable_ctx_params(ossl_unused void *vctx,
         OSSL_PARAM_utf8_string(OSSL_DRBG_PARAM_MAC, NULL, 0),
         OSSL_PARAM_utf8_string(OSSL_DRBG_PARAM_DIGEST, NULL, 0),
         OSSL_PARAM_DRBG_GETTABLE_CTX_COMMON,
+        OSSL_FIPS_IND_GETTABLE_CTX_PARAM()
         OSSL_PARAM_END
     };
     return known_gettable_ctx_params;
@@ -409,12 +413,17 @@ static int drbg_hmac_set_ctx_params_locked(void *vctx, const OSSL_PARAM params[]
     PROV_DRBG_HMAC *hmac = (PROV_DRBG_HMAC *)ctx->data;
     OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(ctx->provctx);
     const EVP_MD *md;
+    int md_size;
+
+    if (!OSSL_FIPS_IND_SET_CTX_PARAM(ctx, OSSL_FIPS_IND_SETTABLE0, params,
+                                     OSSL_DRBG_PARAM_FIPS_DIGEST_CHECK))
+        return 0;
 
     if (!ossl_prov_digest_load_from_params(&hmac->digest, params, libctx))
         return 0;
 
     md = ossl_prov_digest_md(&hmac->digest);
-    if (md != NULL && !ossl_drbg_verify_digest(libctx, md))
+    if (md != NULL && !ossl_drbg_verify_digest(ctx, libctx, md))
         return 0;   /* Error already raised for us */
 
     if (!ossl_prov_macctx_load_from_params(&hmac->ctx, params,
@@ -423,7 +432,10 @@ static int drbg_hmac_set_ctx_params_locked(void *vctx, const OSSL_PARAM params[]
 
     if (md != NULL && hmac->ctx != NULL) {
         /* These are taken from SP 800-90 10.1 Table 2 */
-        hmac->blocklen = EVP_MD_get_size(md);
+        md_size = EVP_MD_get_size(md);
+        if (md_size <= 0)
+            return 0;
+        hmac->blocklen = (size_t)md_size;
         /* See SP800-57 Part1 Rev4 5.6.1 Table 3 */
         ctx->strength = 64 * (int)(hmac->blocklen >> 3);
         if (ctx->strength > 256)
@@ -460,6 +472,7 @@ static const OSSL_PARAM *drbg_hmac_settable_ctx_params(ossl_unused void *vctx,
         OSSL_PARAM_utf8_string(OSSL_DRBG_PARAM_DIGEST, NULL, 0),
         OSSL_PARAM_utf8_string(OSSL_DRBG_PARAM_MAC, NULL, 0),
         OSSL_PARAM_DRBG_SETTABLE_CTX_COMMON,
+        OSSL_FIPS_IND_SETTABLE_CTX_PARAM(OSSL_DRBG_PARAM_FIPS_DIGEST_CHECK)
         OSSL_PARAM_END
     };
     return known_settable_ctx_params;

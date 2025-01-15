@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2022-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -21,6 +21,7 @@
 # include "internal/quic_fc.h"
 # include "internal/bio_addr.h"
 # include "internal/time.h"
+# include "internal/qlog.h"
 
 # ifndef OPENSSL_NO_QUIC
 
@@ -49,6 +50,8 @@ typedef struct ossl_quic_tx_packetiser_args_st {
     OSSL_CC_DATA    *cc_data;   /* QUIC Congestion Controller Instance */
     OSSL_TIME       (*now)(void *arg);  /* Callback to get current time. */
     void            *now_arg;
+    QLOG            *(*get_qlog_cb)(void *arg); /* Optional QLOG retrieval func */
+    void            *get_qlog_cb_arg;
 
     /*
      * Injected dependencies - crypto streams.
@@ -135,6 +138,13 @@ int ossl_quic_tx_packetiser_set_cur_scid(OSSL_QUIC_TX_PACKETISER *txp,
  */
 int ossl_quic_tx_packetiser_set_peer(OSSL_QUIC_TX_PACKETISER *txp,
                                      const BIO_ADDR *peer);
+
+/*
+ * Change the QLOG instance retrieval function in use after instantiation.
+ */
+void ossl_quic_tx_packetiser_set_qlog_cb(OSSL_QUIC_TX_PACKETISER *txp,
+                                         QLOG *(*get_qlog_cb)(void *arg),
+                                         void *get_qlog_cb_arg);
 
 /*
  * Inform the TX packetiser that an EL has been discarded. Idempotent.

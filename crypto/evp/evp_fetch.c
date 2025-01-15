@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2019-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -323,7 +323,7 @@ inner_evp_generic_fetch(struct evp_method_data_st *methdata,
              * will create a method against all names, but the lookup will fail
              * as ossl_namemap_name2num treats the name string as a single name
              * rather than introducing new features where in the EVP_<obj>_fetch
-             * parses the string and querys for each, return an error.
+             * parses the string and queries for each, return an error.
              */
             if (name_id == 0)
                 name_id = ossl_namemap_name2num(namemap, name);
@@ -579,6 +579,11 @@ char *evp_get_global_properties_str(OSSL_LIB_CTX *libctx, int loadconfig)
         return NULL;
     }
     return propstr;
+}
+
+char *EVP_get1_default_properties(OSSL_LIB_CTX *libctx)
+{
+    return evp_get_global_properties_str(libctx, ossl_lib_ctx_is_global_default(libctx));
 }
 
 struct filter_data_st {

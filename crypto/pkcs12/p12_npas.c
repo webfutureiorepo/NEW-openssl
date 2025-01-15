@@ -1,5 +1,5 @@
 /*
- * Copyright 1999-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1999-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -212,8 +212,7 @@ static int alg_get(const X509_ALGOR *alg, int *pnid, int *piter,
         if (pbe2 == NULL)
             goto done;
 
-        X509_ALGOR_get0(&aoid, &aparamtype, &aparam, pbe2->keyfunc);
-        pbenid = OBJ_obj2nid(aoid);
+        X509_ALGOR_get0(NULL, &aparamtype, &aparam, pbe2->keyfunc);
         X509_ALGOR_get0(&aoid, NULL, NULL, pbe2->encryption);
         encnid = OBJ_obj2nid(aoid);
 

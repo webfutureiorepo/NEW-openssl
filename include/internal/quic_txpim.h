@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2022-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -32,6 +32,9 @@ typedef struct quic_txpim_pkt_st {
 
     /* Reserved for FIFD use. */
     QUIC_FIFD          *fifd;
+
+    /* QUIC_PKT_TYPE value. For diagnostic use only. */
+    unsigned char       pkt_type;
 
     /* Regenerate-strategy frames. */
     unsigned int        had_handshake_done_frame    : 1;

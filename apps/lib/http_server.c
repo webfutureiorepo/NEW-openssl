@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -18,19 +18,15 @@
 #endif
 
 #include <ctype.h>
+#include "internal/e_os.h"
 #include "http_server.h"
-#include "internal/sockets.h"
+#include "internal/sockets.h" /* for openssl_fdset() */
+
 #include <openssl/err.h>
 #include <openssl/trace.h>
 #include <openssl/rand.h>
 #include "s_apps.h"
 #include "log.h"
-
-#if defined(__TANDEM)
-# if defined(OPENSSL_TANDEM_FLOSS)
-#  include <floss.h(floss_fork)>
-# endif
-#endif
 
 #define HTTP_PREFIX "HTTP/"
 #define HTTP_VERSION_PATT "1." /* allow 1.x */
@@ -200,7 +196,7 @@ BIO *http_server_init(const char *prog, const char *port, int verb)
     int port_num;
     char name[40];
 
-    snprintf(name, sizeof(name), "*:%s", port); /* port may be "0" */
+    BIO_snprintf(name, sizeof(name), "*:%s", port); /* port may be "0" */
     if (verb >= 0 && !log_set_verbosity(prog, verb))
         return NULL;
     bufbio = BIO_new(BIO_f_buffer());
@@ -208,8 +204,9 @@ BIO *http_server_init(const char *prog, const char *port, int verb)
         goto err;
     acbio = BIO_new(BIO_s_accept());
     if (acbio == NULL
-        || BIO_set_bind_mode(acbio, BIO_BIND_REUSEADDR) < 0
-        || BIO_set_accept_name(acbio, name) < 0) {
+        || BIO_set_accept_ip_family(acbio, BIO_FAMILY_IPANY) <= 0 /* IPv4/6 */
+        || BIO_set_bind_mode(acbio, BIO_BIND_REUSEADDR) <= 0
+        || BIO_set_accept_name(acbio, name) <= 0) {
         log_HTTP(prog, LOG_ERR, "error setting up accept BIO");
         goto err;
     }

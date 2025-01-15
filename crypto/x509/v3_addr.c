@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2006-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -407,11 +407,11 @@ static int make_addressPrefix(IPAddressOrRange **result, unsigned char *addr,
                               const int prefixlen, const int afilen)
 {
     int bytelen = (prefixlen + 7) / 8, bitlen = prefixlen % 8;
-    IPAddressOrRange *aor = IPAddressOrRange_new();
+    IPAddressOrRange *aor;
 
     if (prefixlen < 0 || prefixlen > (afilen * 8))
         return 0;
-    if (aor == NULL)
+    if ((aor = IPAddressOrRange_new()) == NULL)
         return 0;
     aor->type = IPAddressOrRange_addressPrefix;
     if (aor->u.addressPrefix == NULL &&

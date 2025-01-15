@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2010-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -485,7 +485,11 @@ static void gcm_get_funcs(struct gcm_funcs_st *ctx)
 #elif defined(GHASH_ASM_ARM)
     /* ARM defaults */
     ctx->gmult = gcm_gmult_4bit;
+# if !defined(OPENSSL_SMALL_FOOTPRINT)
     ctx->ghash = gcm_ghash_4bit;
+# else
+    ctx->ghash = NULL;
+# endif
 # ifdef PMULL_CAPABLE
     if (PMULL_CAPABLE) {
         ctx->ginit = (gcm_init_fn)gcm_init_v8;

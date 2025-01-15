@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2008-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -15,12 +15,14 @@
 #include <openssl/asn1.h>
 #include <openssl/cms.h>
 #include "internal/sizes.h"
+#include "internal/cryptlib.h"
 #include "crypto/x509.h"
 #include "cms_local.h"
 
 static STACK_OF(CMS_CertificateChoices)
 **cms_get0_certificate_choices(CMS_ContentInfo *cms);
 
+IMPLEMENT_ASN1_ALLOC_FUNCTIONS(CMS_ContentInfo)
 IMPLEMENT_ASN1_PRINT_FUNCTION(CMS_ContentInfo)
 
 CMS_ContentInfo *d2i_CMS_ContentInfo(CMS_ContentInfo **a,
@@ -64,20 +66,6 @@ CMS_ContentInfo *CMS_ContentInfo_new_ex(OSSL_LIB_CTX *libctx, const char *propq)
         }
     }
     return ci;
-}
-
-CMS_ContentInfo *CMS_ContentInfo_new(void)
-{
-    return CMS_ContentInfo_new_ex(NULL, NULL);
-}
-
-void CMS_ContentInfo_free(CMS_ContentInfo *cms)
-{
-    if (cms != NULL) {
-        ossl_cms_env_enc_content_free(cms);
-        OPENSSL_free(cms->ctx.propq);
-        ASN1_item_free((ASN1_VALUE *)cms, ASN1_ITEM_rptr(CMS_ContentInfo));
-    }
 }
 
 const CMS_CTX *ossl_cms_get0_cmsctx(const CMS_ContentInfo *cms)
@@ -633,52 +621,92 @@ int CMS_add1_crl(CMS_ContentInfo *cms, X509_CRL *crl)
 STACK_OF(X509) *CMS_get1_certs(CMS_ContentInfo *cms)
 {
     STACK_OF(X509) *certs = NULL;
+
+    if (!ossl_cms_get1_certs_ex(cms, &certs))
+        return NULL;
+    if (sk_X509_num(certs) == 0) {
+        sk_X509_free(certs);
+        return NULL;
+    }
+    return certs;
+}
+
+int ossl_cms_get1_certs_ex(CMS_ContentInfo *cms, STACK_OF(X509) **certs)
+{
     CMS_CertificateChoices *cch;
     STACK_OF(CMS_CertificateChoices) **pcerts;
-    int i;
+    int i, n;
 
+    if (certs == NULL)
+        return 0;
+    *certs = NULL;
     pcerts = cms_get0_certificate_choices(cms);
     if (pcerts == NULL)
-        return NULL;
-    for (i = 0; i < sk_CMS_CertificateChoices_num(*pcerts); i++) {
+        return 0;
+
+    /* make sure to return NULL *certs only on error */
+    n = sk_CMS_CertificateChoices_num(*pcerts);
+    if ((*certs = sk_X509_new_reserve(NULL, n)) == NULL)
+        return 0;
+
+    for (i = 0; i < n; i++) {
         cch = sk_CMS_CertificateChoices_value(*pcerts, i);
         if (cch->type == 0) {
-            if (!ossl_x509_add_cert_new(&certs, cch->d.certificate,
-                                        X509_ADD_FLAG_UP_REF)) {
-                OSSL_STACK_OF_X509_free(certs);
-                return NULL;
+            if (!X509_add_cert(*certs, cch->d.certificate,
+                               X509_ADD_FLAG_UP_REF)) {
+                OSSL_STACK_OF_X509_free(*certs);
+                *certs = NULL;
+                return 0;
             }
         }
     }
-    return certs;
-
+    return 1;
 }
 
 STACK_OF(X509_CRL) *CMS_get1_crls(CMS_ContentInfo *cms)
 {
     STACK_OF(X509_CRL) *crls = NULL;
+
+    if (!ossl_cms_get1_crls_ex(cms, &crls))
+        return NULL;
+    if (sk_X509_CRL_num(crls) == 0) {
+        sk_X509_CRL_free(crls);
+        return NULL;
+    }
+    return crls;
+}
+
+int ossl_cms_get1_crls_ex(CMS_ContentInfo *cms, STACK_OF(X509_CRL) **crls)
+{
     STACK_OF(CMS_RevocationInfoChoice) **pcrls;
     CMS_RevocationInfoChoice *rch;
-    int i;
+    int i, n;
 
+    if (crls == NULL)
+        return 0;
+    *crls = NULL;
     pcrls = cms_get0_revocation_choices(cms);
     if (pcrls == NULL)
-        return NULL;
-    for (i = 0; i < sk_CMS_RevocationInfoChoice_num(*pcrls); i++) {
+        return 0;
+
+    /* make sure to return NULL *crls only on error */
+    n = sk_CMS_RevocationInfoChoice_num(*pcrls);
+    if ((*crls = sk_X509_CRL_new_reserve(NULL, n)) == NULL)
+        return 0;
+
+    for (i = 0; i < n; i++) {
         rch = sk_CMS_RevocationInfoChoice_value(*pcrls, i);
         if (rch->type == 0) {
-            if (crls == NULL) {
-                if ((crls = sk_X509_CRL_new_null()) == NULL)
-                    return NULL;
-            }
-            if (!sk_X509_CRL_push(crls, rch->d.crl)
-                    || !X509_CRL_up_ref(rch->d.crl)) {
-                sk_X509_CRL_pop_free(crls, X509_CRL_free);
-                return NULL;
+            if (!X509_CRL_up_ref(rch->d.crl)
+                || !ossl_assert(sk_X509_CRL_push(*crls, rch->d.crl))) {
+                /* push cannot fail on reserved stack */
+                sk_X509_CRL_pop_free(*crls, X509_CRL_free);
+                *crls = NULL;
+                return 0;
             }
         }
     }
-    return crls;
+    return 1;
 }
 
 int ossl_cms_ias_cert_cmp(CMS_IssuerAndSerialNumber *ias, X509 *cert)

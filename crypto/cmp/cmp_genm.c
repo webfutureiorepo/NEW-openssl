@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2022-2024 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright Siemens AG 2022
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
@@ -307,9 +307,11 @@ int OSSL_CMP_get1_rootCaKeyUpdate(OSSL_CMP_CTX *ctx,
     if (!OSSL_CMP_ITAV_get0_rootCaKeyUpdate(itav, newWithNew,
                                             &my_newWithOld, &my_oldWithNew))
         goto end;
-
-    if (*newWithNew == NULL) /* no root CA cert update available */
+    /* no root CA cert update available */
+    if (*newWithNew == NULL) {
+        res = 1;
         goto end;
+    }
     if ((oldWithOld_copy = X509_dup(oldWithOld)) == NULL && oldWithOld != NULL)
         goto end;
     if (!verify_ss_cert_trans(ctx, oldWithOld_copy, my_newWithOld,
@@ -342,5 +344,98 @@ int OSSL_CMP_get1_rootCaKeyUpdate(OSSL_CMP_CTX *ctx,
  end:
     OSSL_CMP_ITAV_free(itav);
     X509_free(oldWithOld_copy);
+    return res;
+}
+
+int OSSL_CMP_get1_crlUpdate(OSSL_CMP_CTX *ctx, const X509 *crlcert,
+                            const X509_CRL *last_crl,
+                            X509_CRL **crl)
+{
+    OSSL_CMP_CRLSTATUS *status = NULL;
+    STACK_OF(OSSL_CMP_CRLSTATUS) *list = NULL;
+    OSSL_CMP_ITAV *req = NULL, *itav = NULL;
+    STACK_OF(X509_CRL) *crls = NULL;
+    int res = 0;
+
+    if (crl == NULL) {
+        ERR_raise(ERR_LIB_CMP, CMP_R_NULL_ARGUMENT);
+        return 0;
+    }
+    *crl = NULL;
+
+    if ((status = OSSL_CMP_CRLSTATUS_create(last_crl, crlcert, 1)) == NULL) {
+        ERR_raise(ERR_LIB_CMP, CMP_R_GENERATE_CRLSTATUS);
+        goto end;
+    }
+    if ((list = sk_OSSL_CMP_CRLSTATUS_new_reserve(NULL, 1)) == NULL) {
+        ERR_raise(ERR_LIB_CMP, CMP_R_GENERATE_CRLSTATUS);
+        goto end;
+    }
+    (void)sk_OSSL_CMP_CRLSTATUS_push(list, status); /* cannot fail */
+
+    if ((req = OSSL_CMP_ITAV_new0_crlStatusList(list)) == NULL)
+        goto end;
+    status = NULL;
+    list = NULL;
+
+    if ((itav = get_genm_itav(ctx, req, NID_id_it_crls, "crl")) == NULL)
+        goto end;
+
+    if (!OSSL_CMP_ITAV_get0_crls(itav, &crls))
+        goto end;
+
+    if (crls == NULL) { /* no CRL update available */
+        res = 1;
+        goto end;
+    }
+    if (sk_X509_CRL_num(crls) != 1) {
+        ERR_raise_data(ERR_LIB_CMP, CMP_R_INVALID_GENP,
+                       "Unexpected number of CRLs in genp: %d",
+                       sk_X509_CRL_num(crls));
+        goto end;
+    }
+
+    if ((*crl = sk_X509_CRL_value(crls, 0)) == NULL || !X509_CRL_up_ref(*crl)) {
+        *crl = NULL;
+        goto end;
+    }
+    res = 1;
+ end:
+    OSSL_CMP_CRLSTATUS_free(status);
+    sk_OSSL_CMP_CRLSTATUS_free(list);
+    OSSL_CMP_ITAV_free(itav);
+    return res;
+}
+
+int OSSL_CMP_get1_certReqTemplate(OSSL_CMP_CTX *ctx,
+                                  OSSL_CRMF_CERTTEMPLATE **certTemplate,
+                                  OSSL_CMP_ATAVS **keySpec)
+{
+    OSSL_CMP_ITAV *req, *itav = NULL;
+    int res = 0;
+
+    if (keySpec != NULL)
+        *keySpec = NULL;
+    if (certTemplate == NULL) {
+        ERR_raise(ERR_LIB_CMP, CMP_R_NULL_ARGUMENT);
+        return 0;
+    }
+    *certTemplate = NULL;
+
+    if ((req = OSSL_CMP_ITAV_new0_certReqTemplate(NULL, NULL)) == NULL) {
+        ERR_raise(ERR_LIB_CMP, CMP_R_GENERATE_CERTREQTEMPLATE);
+        return 0;
+    }
+
+    if ((itav = get_genm_itav(ctx, req, NID_id_it_certReqTemplate,
+                              "certReqTemplate")) == NULL)
+        return 0;
+
+    if (!OSSL_CMP_ITAV_get1_certReqTemplate(itav, certTemplate, keySpec))
+        goto end;
+
+    res = 1;
+ end:
+    OSSL_CMP_ITAV_free(itav);
     return res;
 }

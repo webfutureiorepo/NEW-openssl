@@ -1,4 +1,4 @@
-# Copyright 2021-2023 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2021-2024 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -10,7 +10,9 @@ name: Run-checker daily
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '30 02 * * *'
+  workflow_dispatch:
+
 permissions:
   contents: read
 
@@ -27,6 +29,7 @@ jobs:
           no-asan,
           no-asm,
           no-async,
+          no-atexit,
           no-autoalginit,
           no-autoerrinit,
           no-autoload-config,
@@ -45,6 +48,7 @@ jobs:
           no-crypto-mdebug,
           enable-crypto-mdebug-backtrace,
           no-crypto-mdebug-backtrace,
+          no-ct,
           no-deprecated,
           no-des,
           no-devcryptoeng,
@@ -65,6 +69,7 @@ jobs:
           enable-fips,
           enable-fips enable-acvp-tests,
           enable-fips no-tls1_3,
+          enable-fips no-des no-dsa no-ec2m,
           no-fuzz-afl,
           no-fuzz-libfuzzer,
           no-gost,
@@ -130,8 +135,11 @@ jobs:
           no-zlib,
           enable-zlib-dynamic,
           no-zlib-dynamic,
+          -DOPENSSL_PEDANTIC_ZEROIZATION,
+          -DOPENSSL_PEDANTIC_ZEROIZATION enable-fips,
           -DOPENSSL_NO_BUILTIN_OVERFLOW_CHECKING,
-          -DSSL3_ALIGN_PAYLOAD=4
+          -DSSL3_ALIGN_PAYLOAD=4,
+          -DOPENSSL_TLS_SECURITY_LEVEL=0
         ]
     runs-on: ubuntu-latest
     steps:
@@ -268,6 +276,10 @@ jobs:
       uses: actions/checkout@v4
     - name: checkout fuzz/corpora submodule
       run: git submodule update --init --depth 1 fuzz/corpora
+    - name: Adjust ASLR for sanitizer
+      run: |
+        sudo cat /proc/sys/vm/mmap_rnd_bits
+        sudo sysctl -w vm.mmap_rnd_bits=28
     - name: config
       run: ./config --banner=Configured --debug enable-asan enable-ubsan enable-comp enable-brotli -DPEDANTIC && perl configdata.pm --dump
     - name: make
@@ -290,6 +302,10 @@ jobs:
       uses: actions/checkout@v4
     - name: checkout fuzz/corpora submodule
       run: git submodule update --init --depth 1 fuzz/corpora
+    - name: Adjust ASLR for sanitizer
+      run: |
+        sudo cat /proc/sys/vm/mmap_rnd_bits
+        sudo sysctl -w vm.mmap_rnd_bits=28
     - name: config
       run: ./config --banner=Configured --debug enable-asan enable-ubsan enable-comp enable-zstd -DPEDANTIC && perl configdata.pm --dump
     - name: make
@@ -304,7 +320,7 @@ jobs:
   enable_tfo:
     strategy:
       matrix:
-        os: [ ubuntu-latest, macos-latest ]
+        os: [ ubuntu-latest, macos-13, macos-14 ]
     runs-on: ${{matrix.os}}
     steps:
     - uses: actions/checkout@v4

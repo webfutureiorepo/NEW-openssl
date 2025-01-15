@@ -1,5 +1,5 @@
 /*
- * Copyright 1999-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1999-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -70,7 +70,7 @@ static int kdf_pbkdf1_do_derive(const unsigned char *pass, size_t passlen,
         || !EVP_DigestFinal_ex(ctx, md_tmp, NULL))
         goto err;
     mdsize = EVP_MD_size(md_type);
-    if (mdsize < 0)
+    if (mdsize <= 0)
         goto err;
     if (n > (size_t)mdsize) {
         ERR_raise(ERR_LIB_PROV, PROV_R_LENGTH_TOO_LARGE);

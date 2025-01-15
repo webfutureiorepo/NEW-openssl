@@ -1,5 +1,5 @@
 #! /usr/bin/env perl
-# Copyright 2015-2023 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2015-2024 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -15,7 +15,7 @@ use OpenSSL::Test qw/:DEFAULT srctop_file/;
 
 setup("test_req");
 
-plan tests => 107;
+plan tests => 111;
 
 require_ok(srctop_file('test', 'recipes', 'tconversion.pl'));
 
@@ -36,7 +36,7 @@ if (disabled("rsa")) {
 $ENV{MSYS2_ARG_CONV_EXCL} = "/CN=";
 
 # Check for duplicate -addext parameters, and one "working" case.
-my @addext_args = ( "openssl", "req", "-new", "-out", "testreq.pem",
+my @addext_args = ( "openssl", "req", "-new", "-out", "testreq-addexts.pem",
                     "-key",  srctop_file(@certs, "ee-key.pem"),
     "-config", srctop_file("test", "test.cnf"), @req_new );
 my $val = "subjectAltName=DNS:example.com";
@@ -53,6 +53,10 @@ ok(!run(app([@addext_args, "-addext", $val, "-addext", $val2])));
 ok(!run(app([@addext_args, "-addext", $val, "-addext", $val3])));
 ok(!run(app([@addext_args, "-addext", $val2, "-addext", $val3])));
 ok(run(app([@addext_args, "-addext", "SXNetID=1:one, 2:two, 3:three"])));
+ok(run(app([@addext_args, "-addext", "subjectAltName=dirName:dirname_sec"])));
+
+ok(run(app([@addext_args, "-addext", "keyUsage=digitalSignature",
+           "-reqexts", "reqexts"]))); # referring to section in test.cnf
 
 # If a CSR is provided with neither of -key or -CA/-CAkey, this should fail.
 ok(!run(app(["openssl", "req", "-x509",
@@ -351,6 +355,56 @@ subtest "generating SM2 certificate requests" => sub {
     }
 };
 
+subtest "generating certificate requests with -cipher flag" => sub {
+    plan tests => 6;
+
+    diag("Testing -cipher flag with aes-256-cbc...");
+    ok(run(app(["openssl", "req",
+                "-config", srctop_file("test", "test.cnf"),
+                "-newkey", "rsa:2048",
+                "-keyout", "privatekey-aes256.pem",
+                "-out", "testreq-rsa-cipher.pem",
+                "-utf8",
+                "-cipher", "aes-256-cbc",
+                "-passout", "pass:password"])),
+       "Generating request with -cipher flag (AES-256-CBC)");
+
+    diag("Verifying signature for aes-256-cbc...");
+    ok(run(app(["openssl", "req",
+                "-config", srctop_file("test", "test.cnf"),
+                "-verify", "-in", "testreq-rsa-cipher.pem", "-noout"])),
+       "Verifying signature on request with -cipher (AES-256-CBC)");
+
+    open my $fh, '<', "privatekey-aes256.pem" or BAIL_OUT("Could not open key file: $!");
+    my $first_line = <$fh>;
+    close $fh;
+    ok($first_line =~ /^-----BEGIN ENCRYPTED PRIVATE KEY-----/,
+       "Check that the key file is encrypted (AES-256-CBC)");
+
+    diag("Testing -cipher flag with aes-128-cbc...");
+    ok(run(app(["openssl", "req",
+                "-config", srctop_file("test", "test.cnf"),
+                "-newkey", "rsa:2048",
+                "-keyout", "privatekey-aes128.pem",
+                "-out", "testreq-rsa-cipher-aes128.pem",
+                "-utf8",
+                "-cipher", "aes-128-cbc",
+                "-passout", "pass:password"])),
+       "Generating request with -cipher flag (AES-128-CBC)");
+
+    diag("Verifying signature for aes-128-cbc...");
+    ok(run(app(["openssl", "req",
+                "-config", srctop_file("test", "test.cnf"),
+                "-verify", "-in", "testreq-rsa-cipher-aes128.pem", "-noout"])),
+       "Verifying signature on request with -cipher (AES-128-CBC)");
+
+    open my $fh_aes128, '<', "privatekey-aes128.pem" or BAIL_OUT("Could not open key file: $!");
+    my $first_line_aes128 = <$fh_aes128>;
+    close $fh_aes128;
+    ok($first_line_aes128 =~ /^-----BEGIN ENCRYPTED PRIVATE KEY-----/,
+       "Check that the key file is encrypted (AES-128-CBC)");
+};
+
 my @openssl_args = ("req", "-config", srctop_file("apps", "openssl.cnf"));
 
 run_conversion('req conversions',
@@ -606,3 +660,16 @@ ok(run(app(["openssl", "req", "-x509", "-new", "-days", "365",
 # Verify cert
 ok(run(app(["openssl", "x509", "-in", "testreq-cert.pem",
             "-noout", "-text"])), "cert verification");
+
+# Generate cert with explicit start and end dates
+my %today = (strftime("%Y-%m-%d", gmtime) => 1);
+my $cert = "self-signed_explicit_date.pem";
+ok(run(app(["openssl", "req", "-x509", "-new", "-text",
+            "-config", srctop_file('test', 'test.cnf'),
+            "-key", srctop_file("test", "testrsa.pem"),
+            "-not_before", "today",
+            "-not_after", "today",
+            "-out", $cert]))
+&& ++$today{strftime("%Y-%m-%d", gmtime)}
+&& (grep { defined $today{$_} } get_not_before_date($cert))
+&& (grep { defined $today{$_} } get_not_after_date($cert)), "explicit start and end dates");

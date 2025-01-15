@@ -1,5 +1,5 @@
 /*
- * Copyright 2022-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2022-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -15,6 +15,7 @@
 # include "internal/quic_record_tx.h"
 # include "internal/quic_wire.h"
 # include "internal/quic_predef.h"
+# include "internal/qlog.h"
 # include "internal/time.h"
 # include "internal/thread.h"
 
@@ -118,6 +119,12 @@ typedef struct quic_channel_args_st {
 
     int             is_server;
     SSL             *tls;
+
+    /* Whether to use qlog. */
+    int             use_qlog;
+
+    /* Title to use for the qlog session, or NULL. */
+    const char      *qlog_title;
 } QUIC_CHANNEL_ARGS;
 
 /* Represents the cause for a connection's termination. */
@@ -414,6 +421,29 @@ void ossl_quic_channel_get_diag_local_cid(QUIC_CHANNEL *ch, QUIC_CONN_ID *cid);
  * locally-initiated stream.
  */
 int ossl_quic_channel_is_new_local_stream_admissible(QUIC_CHANNEL *ch, int is_uni);
+
+/*
+ * Returns the number of additional streams that can currently be created based
+ * on flow control.
+ */
+uint64_t ossl_quic_channel_get_local_stream_count_avail(const QUIC_CHANNEL *ch,
+                                                        int is_uni);
+uint64_t ossl_quic_channel_get_remote_stream_count_avail(const QUIC_CHANNEL *ch,
+                                                         int is_uni);
+
+/*
+ * Returns 1 if we have generated our local transport parameters yet.
+ */
+int ossl_quic_channel_have_generated_transport_params(const QUIC_CHANNEL *ch);
+
+/* Configures the idle timeout to request from peer (milliseconds, 0=no timeout). */
+void ossl_quic_channel_set_max_idle_timeout_request(QUIC_CHANNEL *ch, uint64_t ms);
+/* Get the configured idle timeout to request from peer. */
+uint64_t ossl_quic_channel_get_max_idle_timeout_request(const QUIC_CHANNEL *ch);
+/* Get the idle timeout requested by the peer. */
+uint64_t ossl_quic_channel_get_max_idle_timeout_peer_request(const QUIC_CHANNEL *ch);
+/* Get the idle timeout actually negotiated. */
+uint64_t ossl_quic_channel_get_max_idle_timeout_actual(const QUIC_CHANNEL *ch);
 
 # endif
 

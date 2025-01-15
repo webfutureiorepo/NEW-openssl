@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2023 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -525,8 +525,7 @@ EVP_PKEY *EVP_PKEY_new_raw_public_key(int type, ENGINE *e,
     return new_raw_key_int(NULL, NULL, NULL, type, e, pub, len, 0);
 }
 
-struct raw_key_details_st
-{
+struct raw_key_details_st {
     unsigned char **key;
     size_t *len;
     int selection;
@@ -1672,7 +1671,7 @@ int EVP_PKEY_up_ref(EVP_PKEY *pkey)
     if (CRYPTO_UP_REF(&pkey->references, &i) <= 0)
         return 0;
 
-    REF_PRINT_COUNT("EVP_PKEY", pkey);
+    REF_PRINT_COUNT("EVP_PKEY", i, pkey);
     REF_ASSERT_ISNT(i < 2);
     return ((i > 1) ? 1 : 0);
 }
@@ -1793,7 +1792,7 @@ void EVP_PKEY_free(EVP_PKEY *x)
         return;
 
     CRYPTO_DOWN_REF(&x->references, &i);
-    REF_PRINT_COUNT("EVP_PKEY", x);
+    REF_PRINT_COUNT("EVP_PKEY", i, x);
     if (i > 0)
         return;
     REF_ASSERT_ISNT(i < 0);
@@ -1916,7 +1915,15 @@ void *evp_pkey_export_to_provider(EVP_PKEY *pk, OSSL_LIB_CTX *libctx,
              * If |tmp_keymgmt| is present in the operation cache, it means
              * that export doesn't need to be redone.  In that case, we take
              * token copies of the cached pointers, to have token success
-             * values to return.
+             * values to return. It is possible (e.g. in a no-cached-fetch
+             * build), for op->keymgmt to be a different pointer to tmp_keymgmt
+             * even though the name/provider must be the same. In other words
+             * the keymgmt instance may be different but still equivalent, i.e.
+             * same algorithm/provider instance - but we make the simplifying
+             * assumption that the keydata can be used with either keymgmt
+             * instance. Not doing so introduces significant complexity and
+             * probably requires refactoring - since we would have to ripple
+             * the change in keymgmt instance up the call chain.
              */
             if (op != NULL && op->keymgmt != NULL) {
                 keydata = op->keydata;
