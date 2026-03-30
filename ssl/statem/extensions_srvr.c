@@ -347,6 +347,15 @@ int tls_parse_ctos_status_request(SSL_CONNECTION *s, PACKET *pkt,
     if (x != NULL)
         return 1;
 
+    /*
+     * We only care about this extension if the application
+     * registered a callback. Otherwise, there is nothing to
+     * tell us that a response is needed.
+     */
+    SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
+    if (sctx == NULL || sctx->ext.status_cb == NULL)
+        return 1;
+
     if (!PACKET_get_1(pkt, (unsigned int *)&s->ext.status_type)) {
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
         return 0;
