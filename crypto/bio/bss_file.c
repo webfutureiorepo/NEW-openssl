@@ -64,7 +64,7 @@ BIO *BIO_new_file(const char *filename, const char *mode)
         fp_flags |= BIO_FP_TEXT;
 
     if (filename == NULL) {
-        ERR_raise_data(ERR_LIB_CRYPTO, ERR_R_PASSED_NULL_PARAMETER, __func__);
+        ERR_raise(ERR_LIB_CRYPTO, ERR_R_PASSED_NULL_PARAMETER);
         return NULL;
     }
 
@@ -317,7 +317,7 @@ static long file_ctrl(BIO *b, int cmd, long num, void *ptr)
             OPENSSL_strlcat(p, "b", sizeof(p));
 #endif
         if (ptr == NULL) {
-            ERR_raise_data(ERR_LIB_CRYPTO, ERR_R_PASSED_NULL_PARAMETER, __func__);
+            ERR_raise(ERR_LIB_CRYPTO, ERR_R_PASSED_NULL_PARAMETER);
             ret = 0;
             break;
         }
