@@ -42,6 +42,11 @@ OpenSSL Releases
 
    *Shane Lontis*
 
+ * The API functions `CRYPTO_atomic_load_ptr`, `CRYPTO_atomic_store_ptr`, and
+   `CRYPTO_atomic_cmp_exch_ptr` have been added to libcrypto.
+
+   *Neil Horman*
+
  * The `openssl pkeyutl` command now uses memory-mapped I/O when reading
    raw input from a file for oneshot sign/verify operations (such as Ed25519,
    Ed448, and ML-DSA) on platforms that support it (Unix-like). The
